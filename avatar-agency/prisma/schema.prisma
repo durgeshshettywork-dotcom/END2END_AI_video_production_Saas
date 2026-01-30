@@ -1,0 +1,145 @@
+// Avatar Agency Database Schema
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Enums
+enum UserRole {
+  ADMIN
+  EDITOR
+}
+
+enum ProjectStatus {
+  CREATED
+  RESEARCH_IN_PROGRESS
+  RESEARCH_COMPLETE
+  SCRIPT_IN_PROGRESS
+  SCRIPT_PENDING_APPROVAL
+  SCRIPT_APPROVED
+  PRODUCTION_IN_PROGRESS
+  PRODUCTION_PENDING_APPROVAL
+  PRODUCTION_APPROVED
+  EDITING_ASSIGNED
+  EDITING_IN_PROGRESS
+  FINAL_REVIEW
+  COMPLETED
+  CANCELLED
+}
+
+enum ActivityAction {
+  PROJECT_CREATED
+  STATUS_CHANGED
+  SCRIPT_APPROVED
+  SCRIPT_REJECTED
+  VIDEO_APPROVED
+  VIDEO_REJECTED
+  EDITOR_ASSIGNED
+  FINAL_SUBMITTED
+  FEEDBACK_SENT
+  PROJECT_COMPLETED
+  PROJECT_CANCELLED
+  WEBHOOK_CALLED
+  WEBHOOK_SUCCESS
+  WEBHOOK_FAILED
+  WEBHOOK_RETRY
+}
+
+// Models
+model User {
+  id            String    @id @default(cuid())
+  name          String
+  email         String    @unique
+  password      String
+  role          UserRole  @default(EDITOR)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  assignedProjects Project[] @relation("EditorProjects")
+  activityLogs     ActivityLog[]
+
+  @@map("users")
+}
+
+model Client {
+  id                    String    @id @default(cuid())
+  name                  String
+  contentNiche          String
+  avatarId              String
+  voiceId               String
+  brandGuidelinesUrl    String?
+  editingGuidelinesUrl  String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  // Relations
+  projects Project[]
+
+  @@map("clients")
+}
+
+model Project {
+  id              String        @id @default(cuid())
+  videoIdea       String
+  deadline        DateTime
+  status          ProjectStatus @default(CREATED)
+
+  // Webhook data
+  researchOutput  String?       @db.Text
+  script          String?       @db.Text
+  scriptFeedback  String?       @db.Text
+  rawVideoUrl     String?
+  finalVideoUrl   String?
+
+  // Webhook status tracking
+  webhookStatus   String?       // pending, success, error
+  webhookError    String?       @db.Text
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relations
+  clientId        String
+  client          Client        @relation(fields: [clientId], references: [id])
+
+  editorId        String
+  editor          User          @relation("EditorProjects", fields: [editorId], references: [id])
+
+  activityLogs    ActivityLog[]
+
+  @@map("projects")
+}
+
+model ActivityLog {
+  id          String         @id @default(cuid())
+  action      ActivityAction
+  details     Json?
+  createdAt   DateTime       @default(now())
+
+  // Relations
+  projectId   String
+  project     Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  userId      String?
+  user        User?          @relation(fields: [userId], references: [id])
+
+  @@map("activity_logs")
+}
+
+// Webhook configuration (optional - could use env vars instead)
+model WebhookConfig {
+  id          String   @id @default(cuid())
+  name        String   @unique  // research, scripting, optimizer, production, notification
+  url         String
+  secret      String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("webhook_configs")
+}
