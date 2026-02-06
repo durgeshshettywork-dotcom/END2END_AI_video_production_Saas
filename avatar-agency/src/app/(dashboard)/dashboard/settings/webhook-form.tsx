@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Loader2, CheckCircle2, XCircle } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -13,7 +13,6 @@ interface WebhookConfigFormProps {
   label: string;
   description: string;
   currentUrl: string;
-  currentSecret: string;
   isActive: boolean;
 }
 
@@ -22,15 +21,11 @@ export function WebhookConfigForm({
   label,
   description,
   currentUrl,
-  currentSecret,
   isActive: initialIsActive,
 }: WebhookConfigFormProps) {
   const [url, setUrl] = useState(currentUrl);
-  const [secret, setSecret] = useState(currentSecret);
   const [isActive, setIsActive] = useState(initialIsActive);
   const [isSaving, setIsSaving] = useState(false);
-  const [isTesting, setIsTesting] = useState(false);
-  const [testResult, setTestResult] = useState<"success" | "error" | null>(null);
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -38,7 +33,7 @@ export function WebhookConfigForm({
       const response = await fetch("/api/webhooks/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, url, secret, isActive }),
+        body: JSON.stringify({ name, url, isActive }),
       });
 
       if (!response.ok) {
@@ -53,38 +48,6 @@ export function WebhookConfigForm({
     }
   };
 
-  const handleTest = async () => {
-    if (!url) {
-      toast.error("Please enter a webhook URL first");
-      return;
-    }
-
-    setIsTesting(true);
-    setTestResult(null);
-
-    try {
-      const response = await fetch("/api/webhooks/test", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, url, secret }),
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        setTestResult("success");
-        toast.success("Webhook test successful");
-      } else {
-        setTestResult("error");
-        toast.error(data.error || "Webhook test failed");
-      }
-    } catch {
-      setTestResult("error");
-      toast.error("Failed to test webhook");
-    } finally {
-      setIsTesting(false);
-    }
-  };
 
   return (
     <div className="border rounded-lg p-4 space-y-4">
@@ -105,27 +68,18 @@ export function WebhookConfigForm({
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="space-y-2">
-          <Label htmlFor={`${name}-url`}>Webhook URL</Label>
-          <Input
-            id={`${name}-url`}
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://your-n8n-instance/webhook/..."
-            type="url"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor={`${name}-secret`}>Secret (Optional)</Label>
-          <Input
-            id={`${name}-secret`}
-            value={secret}
-            onChange={(e) => setSecret(e.target.value)}
-            placeholder="Shared secret for authentication"
-            type="password"
-          />
-        </div>
+      <div className="space-y-2">
+        <Label htmlFor={`${name}-url`}>Webhook URL</Label>
+        <Input
+          id={`${name}-url`}
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="https://your-n8n-instance/webhook/..."
+          type="url"
+        />
+        <p className="text-xs text-muted-foreground">
+          Secret authentication is configured via the WEBHOOK_SECRET environment variable
+        </p>
       </div>
 
       <div className="flex items-center gap-2">
@@ -133,21 +87,9 @@ export function WebhookConfigForm({
           {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           Save
         </Button>
-        <Button
-          onClick={handleTest}
-          disabled={isTesting || !url}
-          variant="outline"
-          size="sm"
-        >
-          {isTesting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          Test Connection
-        </Button>
-        {testResult === "success" && (
-          <CheckCircle2 className="h-5 w-5 text-green-500" />
-        )}
-        {testResult === "error" && (
-          <XCircle className="h-5 w-5 text-red-500" />
-        )}
+        <p className="text-xs text-muted-foreground">
+          Test your webhooks using external tools like curl or Postman
+        </p>
       </div>
     </div>
   );
