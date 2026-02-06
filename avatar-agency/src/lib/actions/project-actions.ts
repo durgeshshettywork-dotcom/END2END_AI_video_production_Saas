@@ -6,6 +6,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { ProjectStatus } from "@prisma/client";
+import { isValidTransition, validateTransition, canCancel } from "@/lib/status-machine";
+import { onProjectCreated, onScriptApproved, onScriptRejected, onVideoApprovedWithEditor, onVideoRejected } from "@/lib/services/webhook-orchestrator";
 
 const createProjectSchema = z.object({
   videoIdea: z.string().min(10, "Video idea must be at least 10 characters"),
@@ -86,9 +88,17 @@ export async function createProject(formData: FormData): Promise<ActionResult> {
       action: "PROJECT_CREATED",
       projectId: project.id,
       userId: session.user.id,
-      details: { videoIdea },
+      details: JSON.stringify({ videoIdea }),
     },
   });
+
+  // Trigger research webhook (starts the automated pipeline)
+  const webhookResult = await onProjectCreated(project.id);
+
+  if (!webhookResult.success) {
+    console.error("Failed to trigger research webhook:", webhookResult.error);
+    // Project is created but webhook failed - admin can retry from UI
+  }
 
   revalidatePath("/dashboard/projects");
   redirect(`/dashboard/projects/${project.id}`);
@@ -236,18 +246,15 @@ export async function approveScript(projectId: string): Promise<ActionResult> {
     return { success: false, error: "Script is not pending approval" };
   }
 
-  await prisma.project.update({
-    where: { id: projectId },
-    data: { status: "SCRIPT_APPROVED" },
-  });
+  // Trigger production webhook via orchestrator
+  // This handles status update, logging, and webhook trigger
+  const result = await onScriptApproved(projectId);
 
-  await prisma.activityLog.create({
-    data: {
-      action: "SCRIPT_APPROVED",
-      projectId,
-      userId: session.user.id,
-    },
-  });
+  if (!result.success) {
+    // Webhook failed but status was updated - log the error
+    console.error("Production webhook failed:", result.error);
+    // Don't return error - the project is approved, webhook can be retried
+  }
 
   revalidatePath("/dashboard/projects");
   revalidatePath(`/dashboard/projects/${projectId}`);
@@ -265,6 +272,10 @@ export async function rejectScript(
     return { success: false, error: "Unauthorized" };
   }
 
+  if (!feedback || feedback.trim().length === 0) {
+    return { success: false, error: "Feedback is required for rejection" };
+  }
+
   const project = await prisma.project.findUnique({
     where: { id: projectId },
   });
@@ -277,22 +288,14 @@ export async function rejectScript(
     return { success: false, error: "Script is not pending approval" };
   }
 
-  await prisma.project.update({
-    where: { id: projectId },
-    data: {
-      status: "SCRIPT_IN_PROGRESS",
-      scriptFeedback: feedback,
-    },
-  });
+  // Trigger optimizer webhook via orchestrator
+  // This handles status update, feedback storage, logging, and webhook trigger
+  const result = await onScriptRejected(projectId, feedback);
 
-  await prisma.activityLog.create({
-    data: {
-      action: "SCRIPT_REJECTED",
-      projectId,
-      userId: session.user.id,
-      details: { feedback },
-    },
-  });
+  if (!result.success) {
+    console.error("Optimizer webhook failed:", result.error);
+    // Don't return error - the rejection is recorded, webhook can be retried
+  }
 
   revalidatePath("/dashboard/projects");
   revalidatePath(`/dashboard/projects/${projectId}`);
@@ -300,11 +303,18 @@ export async function rejectScript(
   return { success: true };
 }
 
-export async function approveVideo(projectId: string): Promise<ActionResult> {
+export async function approveVideo(
+  projectId: string,
+  editorId: string
+): Promise<ActionResult> {
   const session = await auth();
 
   if (session?.user?.role !== "ADMIN") {
     return { success: false, error: "Unauthorized" };
+  }
+
+  if (!editorId) {
+    return { success: false, error: "Editor must be assigned when approving video" };
   }
 
   const project = await prisma.project.findUnique({
@@ -319,18 +329,64 @@ export async function approveVideo(projectId: string): Promise<ActionResult> {
     return { success: false, error: "Video is not pending approval" };
   }
 
-  await prisma.project.update({
-    where: { id: projectId },
-    data: { status: "PRODUCTION_APPROVED" },
+  // Verify editor exists
+  const editor = await prisma.user.findUnique({
+    where: { id: editorId },
   });
 
-  await prisma.activityLog.create({
-    data: {
-      action: "VIDEO_APPROVED",
-      projectId,
-      userId: session.user.id,
-    },
+  if (!editor || editor.role !== "EDITOR") {
+    return { success: false, error: "Invalid editor selected" };
+  }
+
+  // Approve video and assign editor via orchestrator
+  // This handles status update, editor assignment, logging, and notification
+  const result = await onVideoApprovedWithEditor(projectId, editorId, session.user.id);
+
+  if (!result.success) {
+    console.error("Editor notification failed:", result.error);
+    // Don't return error - the approval is recorded, notification can be retried
+  }
+
+  revalidatePath("/dashboard/projects");
+  revalidatePath(`/dashboard/projects/${projectId}`);
+
+  return { success: true };
+}
+
+export async function rejectVideo(
+  projectId: string,
+  feedback: string
+): Promise<ActionResult> {
+  const session = await auth();
+
+  if (session?.user?.role !== "ADMIN") {
+    return { success: false, error: "Unauthorized" };
+  }
+
+  if (!feedback || feedback.trim().length === 0) {
+    return { success: false, error: "Feedback is required for rejection" };
+  }
+
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
   });
+
+  if (!project) {
+    return { success: false, error: "Project not found" };
+  }
+
+  if (project.status !== "PRODUCTION_PENDING_APPROVAL") {
+    return { success: false, error: "Video is not pending approval" };
+  }
+
+  // Reject video and trigger regeneration via orchestrator
+  // This handles status update, feedback storage, logging, and production webhook
+  const result = await onVideoRejected(projectId, feedback);
+
+  if (!result.success) {
+    console.error("Production webhook (regeneration) failed:", result.error);
+    // Don't return error - the rejection is recorded, webhook can be retried
+  }
 
   revalidatePath("/dashboard/projects");
   revalidatePath(`/dashboard/projects/${projectId}`);
@@ -399,6 +455,12 @@ export async function completeProject(projectId: string): Promise<ActionResult> 
     return { success: false, error: "Project not found" };
   }
 
+  // Validate status transition
+  if (!isValidTransition(project.status, "COMPLETED")) {
+    const error = validateTransition(project.status, "COMPLETED");
+    return { success: false, error: error || "Invalid status transition" };
+  }
+
   await prisma.project.update({
     where: { id: projectId },
     data: { status: "COMPLETED" },
@@ -431,6 +493,14 @@ export async function cancelProject(projectId: string): Promise<ActionResult> {
 
   if (!project) {
     return { success: false, error: "Project not found" };
+  }
+
+  // Validate that project can be cancelled
+  if (!canCancel(project.status)) {
+    return {
+      success: false,
+      error: `Cannot cancel project in '${project.status}' status`,
+    };
   }
 
   await prisma.project.update({
