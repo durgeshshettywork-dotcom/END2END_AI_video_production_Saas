@@ -234,16 +234,24 @@ export async function approveScript(projectId: string): Promise<ActionResult> {
     return { success: false, error: "Unauthorized" };
   }
 
-  const project = await prisma.project.findUnique({
-    where: { id: projectId },
+  // Atomic status check - prevents race condition
+  // Use updateMany with status condition to ensure only one request wins
+  const lockResult = await prisma.project.updateMany({
+    where: {
+      id: projectId,
+      status: "SCRIPT_PENDING_APPROVAL",
+    },
+    data: {
+      webhookStatus: "pending", // Mark as being processed
+    },
   });
 
-  if (!project) {
-    return { success: false, error: "Project not found" };
-  }
-
-  if (project.status !== "SCRIPT_PENDING_APPROVAL") {
-    return { success: false, error: "Script is not pending approval" };
+  if (lockResult.count === 0) {
+    // Race condition: status already changed by concurrent request
+    return {
+      success: false,
+      error: "Script is not pending approval (may have been already approved/rejected)",
+    };
   }
 
   // Trigger production webhook via orchestrator
@@ -276,16 +284,23 @@ export async function rejectScript(
     return { success: false, error: "Feedback is required for rejection" };
   }
 
-  const project = await prisma.project.findUnique({
-    where: { id: projectId },
+  // Atomic status check - prevents race condition
+  const lockResult = await prisma.project.updateMany({
+    where: {
+      id: projectId,
+      status: "SCRIPT_PENDING_APPROVAL",
+    },
+    data: {
+      webhookStatus: "pending", // Mark as being processed
+    },
   });
 
-  if (!project) {
-    return { success: false, error: "Project not found" };
-  }
-
-  if (project.status !== "SCRIPT_PENDING_APPROVAL") {
-    return { success: false, error: "Script is not pending approval" };
+  if (lockResult.count === 0) {
+    // Race condition: status already changed by concurrent request
+    return {
+      success: false,
+      error: "Script is not pending approval (may have been already approved/rejected)",
+    };
   }
 
   // Trigger optimizer webhook via orchestrator
@@ -317,25 +332,32 @@ export async function approveVideo(
     return { success: false, error: "Editor must be assigned when approving video" };
   }
 
-  const project = await prisma.project.findUnique({
-    where: { id: projectId },
-  });
-
-  if (!project) {
-    return { success: false, error: "Project not found" };
-  }
-
-  if (project.status !== "PRODUCTION_PENDING_APPROVAL") {
-    return { success: false, error: "Video is not pending approval" };
-  }
-
-  // Verify editor exists
+  // Verify editor exists first (before atomic lock)
   const editor = await prisma.user.findUnique({
     where: { id: editorId },
   });
 
   if (!editor || editor.role !== "EDITOR") {
     return { success: false, error: "Invalid editor selected" };
+  }
+
+  // Atomic status check - prevents race condition
+  const lockResult = await prisma.project.updateMany({
+    where: {
+      id: projectId,
+      status: "PRODUCTION_PENDING_APPROVAL",
+    },
+    data: {
+      webhookStatus: "pending", // Mark as being processed
+    },
+  });
+
+  if (lockResult.count === 0) {
+    // Race condition: status already changed by concurrent request
+    return {
+      success: false,
+      error: "Video is not pending approval (may have been already approved/rejected)",
+    };
   }
 
   // Approve video and assign editor via orchestrator
@@ -367,16 +389,23 @@ export async function rejectVideo(
     return { success: false, error: "Feedback is required for rejection" };
   }
 
-  const project = await prisma.project.findUnique({
-    where: { id: projectId },
+  // Atomic status check - prevents race condition
+  const lockResult = await prisma.project.updateMany({
+    where: {
+      id: projectId,
+      status: "PRODUCTION_PENDING_APPROVAL",
+    },
+    data: {
+      webhookStatus: "pending", // Mark as being processed
+    },
   });
 
-  if (!project) {
-    return { success: false, error: "Project not found" };
-  }
-
-  if (project.status !== "PRODUCTION_PENDING_APPROVAL") {
-    return { success: false, error: "Video is not pending approval" };
+  if (lockResult.count === 0) {
+    // Race condition: status already changed by concurrent request
+    return {
+      success: false,
+      error: "Video is not pending approval (may have been already approved/rejected)",
+    };
   }
 
   // Reject video and trigger regeneration via orchestrator
