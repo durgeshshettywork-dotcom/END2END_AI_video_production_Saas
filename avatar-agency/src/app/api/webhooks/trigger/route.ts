@@ -9,6 +9,7 @@ import {
   WebhookType,
 } from "@/lib/services/webhook";
 import { ProjectStatus } from "@prisma/client";
+import { isValidTransition, validateTransition } from "@/lib/status-machine";
 
 export async function POST(request: Request) {
   const session = await auth();
@@ -44,25 +45,38 @@ export async function POST(request: Request) {
     notification: project.status as ProjectStatus, // No status change
   };
 
+  const targetStatus = statusUpdates[webhookType as WebhookType];
+
+  // Validate status transition (except for notification which doesn't change status)
+  if (webhookType !== "notification" && !isValidTransition(project.status, targetStatus)) {
+    const errorMsg = validateTransition(project.status, targetStatus);
+    return NextResponse.json(
+      { error: errorMsg || `Cannot transition from ${project.status} to ${targetStatus}` },
+      { status: 400 }
+    );
+  }
+
   // Update project status before triggering
   await prisma.project.update({
     where: { id: projectId },
     data: {
-      status: statusUpdates[webhookType as WebhookType],
+      status: targetStatus,
       webhookStatus: "pending",
       webhookError: null,
     },
   });
 
-  // Log status change
-  await prisma.activityLog.create({
-    data: {
-      action: "STATUS_CHANGED",
-      projectId,
-      userId: session.user.id,
-      details: { from: project.status, to: statusUpdates[webhookType as WebhookType] },
-    },
-  });
+  // Log status change (only if status actually changed)
+  if (project.status !== targetStatus) {
+    await prisma.activityLog.create({
+      data: {
+        action: "STATUS_CHANGED",
+        projectId,
+        userId: session.user.id,
+        details: { from: project.status, to: targetStatus },
+      },
+    });
+  }
 
   // Trigger the appropriate webhook
   let result;

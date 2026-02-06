@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { ProjectStatus } from "@prisma/client";
 import { onResearchComplete } from "@/lib/services/webhook-orchestrator";
 import { validateWebhookPayload } from "@/lib/validation/webhook-schemas";
+import { isValidTransition } from "@/lib/status-machine";
 
 /**
  * Verify webhook secret (REQUIRED)
@@ -111,11 +112,21 @@ export async function POST(request: Request) {
         // Research agent completed - store output and trigger scripting
         const researchOutput = validatedData.researchOutput || validatedData.output || validatedData.result;
 
+        // Validate status transition
+        const targetStatus: ProjectStatus = "RESEARCH_COMPLETE";
+        if (!isValidTransition(project.status, targetStatus)) {
+          console.warn(`Invalid transition attempt: ${project.status} -> ${targetStatus}`, { projectId, ip: metadata.ip });
+          return NextResponse.json(
+            { error: `Cannot transition from ${project.status} to ${targetStatus}` },
+            { status: 400 }
+          );
+        }
+
         await prisma.project.update({
           where: { id: projectId },
           data: {
             researchOutput,
-            status: "RESEARCH_COMPLETE" as ProjectStatus,
+            status: targetStatus,
             webhookStatus: "success",
             webhookError: null,
           },
@@ -144,11 +155,21 @@ export async function POST(request: Request) {
         // Scripting agent completed - waiting for admin approval
         const script = validatedData.script || validatedData.output || validatedData.result;
 
+        // Validate status transition
+        const targetStatus: ProjectStatus = "SCRIPT_PENDING_APPROVAL";
+        if (!isValidTransition(project.status, targetStatus)) {
+          console.warn(`Invalid transition attempt: ${project.status} -> ${targetStatus}`, { projectId, ip: metadata.ip });
+          return NextResponse.json(
+            { error: `Cannot transition from ${project.status} to ${targetStatus}` },
+            { status: 400 }
+          );
+        }
+
         await prisma.project.update({
           where: { id: projectId },
           data: {
             script,
-            status: "SCRIPT_PENDING_APPROVAL" as ProjectStatus,
+            status: targetStatus,
             webhookStatus: "success",
             webhookError: null,
           },
@@ -169,12 +190,22 @@ export async function POST(request: Request) {
         // Script optimizer completed (after feedback) - waiting for admin approval
         const script = validatedData.script || validatedData.output || validatedData.result;
 
+        // Validate status transition
+        const targetStatus: ProjectStatus = "SCRIPT_PENDING_APPROVAL";
+        if (!isValidTransition(project.status, targetStatus)) {
+          console.warn(`Invalid transition attempt: ${project.status} -> ${targetStatus}`, { projectId, ip: metadata.ip });
+          return NextResponse.json(
+            { error: `Cannot transition from ${project.status} to ${targetStatus}` },
+            { status: 400 }
+          );
+        }
+
         await prisma.project.update({
           where: { id: projectId },
           data: {
             script,
             scriptFeedback: null, // Clear the feedback
-            status: "SCRIPT_PENDING_APPROVAL" as ProjectStatus,
+            status: targetStatus,
             webhookStatus: "success",
             webhookError: null,
           },
@@ -195,11 +226,21 @@ export async function POST(request: Request) {
         // Video production completed (HeyGen) - waiting for admin approval
         const rawVideoUrl = validatedData.videoUrl || validatedData.rawVideoUrl || validatedData.url;
 
+        // Validate status transition
+        const targetStatus: ProjectStatus = "PRODUCTION_PENDING_APPROVAL";
+        if (!isValidTransition(project.status, targetStatus)) {
+          console.warn(`Invalid transition attempt: ${project.status} -> ${targetStatus}`, { projectId, ip: metadata.ip });
+          return NextResponse.json(
+            { error: `Cannot transition from ${project.status} to ${targetStatus}` },
+            { status: 400 }
+          );
+        }
+
         await prisma.project.update({
           where: { id: projectId },
           data: {
             rawVideoUrl,
-            status: "PRODUCTION_PENDING_APPROVAL" as ProjectStatus,
+            status: targetStatus,
             webhookStatus: "success",
             webhookError: null,
           },
