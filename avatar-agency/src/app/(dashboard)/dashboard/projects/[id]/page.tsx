@@ -87,7 +87,7 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
   // Get editors for assignment dropdown
   const editors = isAdmin
     ? await prisma.user.findMany({
-        where: { role: "EDITOR" },
+        where: { role: "EDITOR", isActive: true },
         orderBy: { name: "asc" },
         select: { id: true, name: true },
       })
@@ -255,6 +255,7 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
                   rawVideoUrl: project.rawVideoUrl,
                   webhookStatus: project.webhookStatus,
                   webhookError: project.webhookError,
+                  retryCount: project.retryCount,
                 }}
                 isAdmin={isAdmin}
                 editors={editors}

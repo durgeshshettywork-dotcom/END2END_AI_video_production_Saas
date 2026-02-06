@@ -24,6 +24,7 @@ export default async function ClientsPage() {
   }
 
   const clients = await prisma.client.findMany({
+    where: { isActive: true },
     orderBy: { createdAt: "desc" },
     include: {
       _count: {

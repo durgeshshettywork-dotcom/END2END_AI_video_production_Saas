@@ -13,11 +13,12 @@ export default async function NewProjectPage() {
 
   const [clients, editors] = await Promise.all([
     prisma.client.findMany({
+      where: { isActive: true },
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),
     prisma.user.findMany({
-      where: { role: "EDITOR" },
+      where: { role: "EDITOR", isActive: true },
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),

@@ -11,6 +11,7 @@ export async function GET() {
     }
 
     const configs = await prisma.webhookConfig.findMany({
+      where: { isActive: true },
       orderBy: { name: "asc" },
     });
 

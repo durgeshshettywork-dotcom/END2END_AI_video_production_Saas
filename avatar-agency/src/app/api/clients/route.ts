@@ -11,6 +11,7 @@ export async function GET() {
     }
 
     const clients = await prisma.client.findMany({
+      where: { isActive: true },
       orderBy: { name: "asc" },
       select: {
         id: true,

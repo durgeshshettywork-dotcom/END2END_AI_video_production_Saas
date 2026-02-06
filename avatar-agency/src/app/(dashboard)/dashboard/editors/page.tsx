@@ -25,6 +25,7 @@ export default async function EditorsPage() {
   }
 
   const users = await prisma.user.findMany({
+    where: { isActive: true },
     orderBy: { createdAt: "desc" },
     include: {
       _count: {
