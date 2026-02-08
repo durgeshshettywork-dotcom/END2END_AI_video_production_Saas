@@ -1,4 +1,4 @@
-# 🎬 Avatar Agency - AI-Powered Video Production Platform
+# 🎬 Avatar Agency - AI-Powered Video Production Platform ( Completion in progress. )
 
 A full-stack video production management platform built with Next.js 16, enabling agencies to manage clients, projects, and automated video workflows with AI-powered avatars.
 
