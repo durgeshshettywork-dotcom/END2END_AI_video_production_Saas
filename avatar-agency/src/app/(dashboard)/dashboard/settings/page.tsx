@@ -68,7 +68,6 @@ export default async function SettingsPage() {
                 label={webhook.label}
                 description={webhook.description}
                 currentUrl={config?.url || ""}
-                currentSecret={config?.secret || ""}
                 isActive={config?.isActive ?? true}
               />
             );

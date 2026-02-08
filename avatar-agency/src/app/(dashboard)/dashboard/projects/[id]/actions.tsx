@@ -24,11 +24,12 @@ import {
   approveScript,
   rejectScript,
   approveVideo,
+  rejectVideo,
   submitFinalVideo,
   completeProject,
   cancelProject,
 } from "@/lib/actions/project-actions";
-import { Loader2, Check, X, Upload, UserPlus, Play, Zap } from "lucide-react";
+import { Loader2, Check, X, Upload, UserPlus, Play, Zap, RefreshCw, AlertCircle } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Separator } from "@/components/ui/separator";
@@ -42,6 +43,7 @@ interface ProjectActionsProps {
     rawVideoUrl: string | null;
     webhookStatus: string | null;
     webhookError: string | null;
+    retryCount: number;
   };
   isAdmin: boolean;
   editors: { id: string; name: string }[];
@@ -58,9 +60,13 @@ export function ProjectActions({
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
   const [submitDialogOpen, setSubmitDialogOpen] = useState(false);
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
+  const [videoApproveDialogOpen, setVideoApproveDialogOpen] = useState(false);
+  const [videoRejectDialogOpen, setVideoRejectDialogOpen] = useState(false);
   const [feedback, setFeedback] = useState("");
+  const [videoFeedback, setVideoFeedback] = useState("");
   const [finalVideoUrl, setFinalVideoUrl] = useState("");
   const [selectedEditor, setSelectedEditor] = useState("");
+  const [selectedVideoEditor, setSelectedVideoEditor] = useState("");
 
   const handleAction = async (
     action: string,
@@ -108,6 +114,24 @@ export function ProjectActions({
     setFinalVideoUrl("");
   };
 
+  const handleApproveVideo = async () => {
+    if (!selectedVideoEditor) return;
+    await handleAction("Approve video", () =>
+      approveVideo(project.id, selectedVideoEditor)
+    );
+    setVideoApproveDialogOpen(false);
+    setSelectedVideoEditor("");
+  };
+
+  const handleRejectVideo = async () => {
+    if (!videoFeedback.trim()) return;
+    await handleAction("Reject video", () =>
+      rejectVideo(project.id, videoFeedback)
+    );
+    setVideoRejectDialogOpen(false);
+    setVideoFeedback("");
+  };
+
   const isAssignedEditor = project.editorId === currentUserId;
 
   const triggerWebhook = async (webhookType: string) => {
@@ -126,6 +150,27 @@ export function ProjectActions({
       }
     } catch {
       toast.error("Failed to trigger webhook");
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  const retryWebhook = async () => {
+    setLoading("retry-webhook");
+    try {
+      const response = await fetch("/api/webhooks/retry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: project.id }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        toast.success(`Webhook retried successfully (${data.webhookType})`);
+      } else {
+        toast.error(data.error || "Failed to retry webhook");
+      }
+    } catch {
+      toast.error("Failed to retry webhook");
     } finally {
       setLoading(null);
     }
@@ -193,18 +238,46 @@ export function ProjectActions({
 
           {/* Webhook Status */}
           {project.webhookStatus && (
-            <div className={`text-xs p-2 rounded ${
+            <div className={`text-xs p-3 rounded-lg ${
               project.webhookStatus === "success"
                 ? "bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300"
                 : project.webhookStatus === "error"
                 ? "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300"
                 : "bg-yellow-50 text-yellow-700 dark:bg-yellow-950 dark:text-yellow-300"
             }`}>
-              <p className="font-medium">
-                Webhook: {project.webhookStatus}
-              </p>
+              <div className="flex items-center gap-2">
+                {project.webhookStatus === "error" && (
+                  <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                )}
+                <p className="font-medium">
+                  Webhook: {project.webhookStatus}
+                  {project.retryCount > 0 && (
+                    <span className="ml-1 text-xs opacity-75">
+                      (retried {project.retryCount}x)
+                    </span>
+                  )}
+                </p>
+              </div>
               {project.webhookError && (
-                <p className="mt-1 truncate">{project.webhookError}</p>
+                <p className="mt-2 text-xs break-words whitespace-pre-wrap">
+                  {project.webhookError}
+                </p>
+              )}
+              {project.webhookStatus === "error" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-3 w-full bg-white dark:bg-gray-900"
+                  onClick={retryWebhook}
+                  disabled={loading !== null}
+                >
+                  {loading === "retry-webhook" ? (
+                    <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                  ) : (
+                    <RefreshCw className="mr-2 h-3 w-3" />
+                  )}
+                  Retry Webhook
+                </Button>
               )}
             </div>
           )}
@@ -321,18 +394,100 @@ export function ProjectActions({
 
       {/* Video Review Actions (Admin only, when video pending) */}
       {isAdmin && project.status === "PRODUCTION_PENDING_APPROVAL" && (
-        <Button
-          className="w-full"
-          onClick={() => handleAction("Approve video", () => approveVideo(project.id))}
-          disabled={loading !== null}
-        >
-          {loading === "Approve video" ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <Check className="mr-2 h-4 w-4" />
-          )}
-          Approve Raw Video
-        </Button>
+        <div className="space-y-2">
+          {/* Approve Video with Editor Assignment */}
+          <Dialog open={videoApproveDialogOpen} onOpenChange={setVideoApproveDialogOpen}>
+            <DialogTrigger asChild>
+              <Button className="w-full">
+                <Check className="mr-2 h-4 w-4" />
+                Approve &amp; Assign Editor
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Approve Video &amp; Assign Editor</DialogTitle>
+                <DialogDescription>
+                  Select an editor to work on this video
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="videoEditor">Editor</Label>
+                  <Select value={selectedVideoEditor} onValueChange={setSelectedVideoEditor}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select an editor" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {editors.map((editor) => (
+                        <SelectItem key={editor.id} value={editor.id}>
+                          {editor.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setVideoApproveDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleApproveVideo}
+                  disabled={!selectedVideoEditor || loading === "Approve video"}
+                >
+                  {loading === "Approve video" && (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  )}
+                  Approve &amp; Assign
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Reject Video with Feedback */}
+          <Dialog open={videoRejectDialogOpen} onOpenChange={setVideoRejectDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="destructive" className="w-full">
+                <X className="mr-2 h-4 w-4" />
+                Request Regeneration
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Request Video Regeneration</DialogTitle>
+                <DialogDescription>
+                  Provide feedback for improving the video
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="videoFeedback">Feedback</Label>
+                  <Input
+                    id="videoFeedback"
+                    value={videoFeedback}
+                    onChange={(e) => setVideoFeedback(e.target.value)}
+                    placeholder="Explain what needs to be improved..."
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setVideoRejectDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={handleRejectVideo}
+                  disabled={!videoFeedback.trim() || loading === "Reject video"}
+                >
+                  {loading === "Reject video" && (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  )}
+                  Send Feedback
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
       )}
 
       {/* Submit Final Video (Editor or Admin, when editing) */}

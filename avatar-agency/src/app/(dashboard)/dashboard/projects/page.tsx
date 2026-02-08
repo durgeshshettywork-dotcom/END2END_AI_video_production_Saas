@@ -1,6 +1,8 @@
+import { Suspense } from "react";
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { ProjectStatus, Prisma } from "@prisma/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +17,11 @@ import {
 import { Plus, Video, Clock, CheckCircle2, AlertCircle } from "lucide-react";
 import Link from "next/link";
 import { format } from "date-fns";
+import { ProjectFilters } from "./project-filters";
+
+interface PageProps {
+  searchParams: Promise<{ search?: string; status?: string; client?: string }>;
+}
 
 const statusColors: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   CREATED: "outline",
@@ -50,7 +57,7 @@ const statusLabels: Record<string, string> = {
   CANCELLED: "Cancelled",
 };
 
-export default async function ProjectsPage() {
+export default async function ProjectsPage({ searchParams }: PageProps) {
   const session = await auth();
 
   if (!session?.user) {
@@ -58,18 +65,40 @@ export default async function ProjectsPage() {
   }
 
   const isAdmin = session.user.role === "ADMIN";
+  const params = await searchParams;
+  const { search, status, client: clientId } = params;
+
+  // Build the where clause based on filters
+  const where: Prisma.ProjectWhereInput = {
+    ...(isAdmin ? {} : { editorId: session.user.id }),
+    ...(search && {
+      OR: [
+        { videoIdea: { contains: search, mode: "insensitive" as const } },
+        { client: { name: { contains: search, mode: "insensitive" as const } } },
+      ],
+    }),
+    ...(status && { status: status as ProjectStatus }),
+    ...(clientId && { clientId }),
+  };
 
   const projects = await prisma.project.findMany({
-    where: isAdmin ? {} : { editorId: session.user.id },
+    where,
     orderBy: { createdAt: "desc" },
     include: {
       client: {
-        select: { name: true },
+        select: { id: true, name: true },
       },
       editor: {
         select: { name: true },
       },
     },
+  });
+
+  // Get all clients for filter dropdown
+  const clients = await prisma.client.findMany({
+    where: { isActive: true },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true },
   });
 
   const activeProjects = projects.filter(
@@ -105,6 +134,14 @@ export default async function ProjectsPage() {
           </Button>
         )}
       </div>
+
+      {/* Filters */}
+      <Suspense fallback={<div className="h-10 bg-muted animate-pulse rounded" />}>
+        <ProjectFilters
+          clients={clients}
+          statuses={Object.entries(statusLabels).map(([value, label]) => ({ value, label }))}
+        />
+      </Suspense>
 
       {/* Stats */}
       <div className="grid gap-4 md:grid-cols-4">
@@ -173,9 +210,11 @@ export default async function ProjectsPage() {
                 <TableRow>
                   <TableCell
                     colSpan={isAdmin ? 6 : 5}
-                    className="text-center text-muted-foreground"
+                    className="text-center text-muted-foreground py-8"
                   >
-                    No projects found
+                    {search || status || clientId
+                      ? "No projects match your filters"
+                      : "No projects found"}
                   </TableCell>
                 </TableRow>
               ) : (

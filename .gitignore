@@ -1,0 +1,16 @@
+# macOS
+.DS_Store
+
+# Claude Code project files
+.claude/
+.claude.md
+.planning/
+
+# Environment files (double protection)
+.env
+.env.local
+.env*.local
+
+# Editor directories
+.vscode/
+.idea/

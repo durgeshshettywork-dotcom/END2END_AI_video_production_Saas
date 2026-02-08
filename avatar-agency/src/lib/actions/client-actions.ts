@@ -49,8 +49,8 @@ export async function createClient(formData: FormData): Promise<ActionResult> {
     data: {
       name,
       contentNiche,
-      avatarId: avatarId || null,
-      voiceId: voiceId || null,
+      avatarId: avatarId || "",
+      voiceId: voiceId || "",
       brandGuidelinesUrl: brandGuidelinesUrl || null,
       editingGuidelinesUrl: editingGuidelinesUrl || null,
     },
@@ -101,8 +101,8 @@ export async function updateClient(
     data: {
       name,
       contentNiche,
-      avatarId: avatarId || null,
-      voiceId: voiceId || null,
+      avatarId: avatarId || "",
+      voiceId: voiceId || "",
       brandGuidelinesUrl: brandGuidelinesUrl || null,
       editingGuidelinesUrl: editingGuidelinesUrl || null,
     },

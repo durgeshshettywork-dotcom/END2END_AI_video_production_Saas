@@ -56,6 +56,14 @@ model User {
   email         String    @unique
   password      String
   role          UserRole  @default(EDITOR)
+
+  // Password reset (for AUTH-04)
+  passwordResetToken   String?
+  passwordResetExpires DateTime?
+
+  // Soft delete pattern
+  isActive      Boolean   @default(true)
+
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -63,6 +71,9 @@ model User {
   assignedProjects Project[] @relation("EditorProjects")
   activityLogs     ActivityLog[]
 
+  // Indexes for filtering
+  @@index([role])
+  @@index([isActive])
   @@map("users")
 }
 
@@ -74,12 +85,19 @@ model Client {
   voiceId               String
   brandGuidelinesUrl    String?
   editingGuidelinesUrl  String?
+
+  // Soft delete pattern
+  isActive              Boolean   @default(true)
+
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
   // Relations
   projects Project[]
 
+  // Indexes for searching
+  @@index([name])
+  @@index([isActive])
   @@map("clients")
 }
 
@@ -99,19 +117,33 @@ model Project {
   // Webhook status tracking
   webhookStatus   String?       // pending, success, error
   webhookError    String?       @db.Text
+  lastWebhookType String?       // Which webhook was last triggered
+  retryCount      Int           @default(0)
+
+  // Workflow timestamps (for dashboard metrics)
+  scriptApprovedAt  DateTime?
+  videoApprovedAt   DateTime?
 
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
-  // Relations
+  // Relations with proper cascades
   clientId        String
-  client          Client        @relation(fields: [clientId], references: [id])
+  client          Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
-  editorId        String
-  editor          User          @relation("EditorProjects", fields: [editorId], references: [id])
+  editorId        String?
+  editor          User?         @relation("EditorProjects", fields: [editorId], references: [id], onDelete: SetNull)
 
   activityLogs    ActivityLog[]
 
+  // Indexes for filtering, sorting, and performance
+  @@index([clientId])
+  @@index([editorId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([deadline])
+  @@index([editorId, status])  // Composite: "my pending projects"
+  @@index([status, createdAt]) // Composite: "recent projects by status"
   @@map("projects")
 }
 
@@ -121,25 +153,37 @@ model ActivityLog {
   details     Json?
   createdAt   DateTime       @default(now())
 
-  // Relations
+  // Relations with proper cascades
   projectId   String
   project     Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   userId      String?
-  user        User?          @relation(fields: [userId], references: [id])
+  user        User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
 
+  // Indexes for querying logs
+  @@index([projectId])
+  @@index([userId])
+  @@index([createdAt])
+  @@index([action])
   @@map("activity_logs")
 }
 
-// Webhook configuration (optional - could use env vars instead)
+// Webhook configuration
+// NOTE: Secrets should ONLY be stored in environment variables, never in the database
 model WebhookConfig {
   id          String   @id @default(cuid())
   name        String   @unique  // research, scripting, optimizer, production, notification
   url         String
-  secret      String?
   isActive    Boolean  @default(true)
+
+  // Retry configuration
+  maxRetries    Int      @default(3)
+  retryDelayMs  Int      @default(5000)
+  timeoutMs     Int      @default(30000)
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  @@index([isActive])
   @@map("webhook_configs")
 }

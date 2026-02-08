@@ -50,15 +50,9 @@ export async function getWebhookUrl(type: WebhookType): Promise<string | null> {
   return envMap[type] || null;
 }
 
-export async function getWebhookSecret(type: WebhookType): Promise<string | null> {
-  const config = await prisma.webhookConfig.findUnique({
-    where: { name: type },
-  });
-
-  if (config?.secret) {
-    return config.secret;
-  }
-
+export function getWebhookSecret(): string | null {
+  // Secrets are ONLY stored in environment variables for security
+  // Never store secrets in the database
   return process.env.WEBHOOK_SECRET || null;
 }
 
@@ -72,7 +66,7 @@ export async function callWebhook(
     return { success: false, error: `No URL configured for ${type} webhook` };
   }
 
-  const secret = await getWebhookSecret(type);
+  const secret = getWebhookSecret();
 
   try {
     const headers: Record<string, string> = {
